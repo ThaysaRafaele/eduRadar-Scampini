@@ -1,328 +1,372 @@
-# Dashboard principal do EduRadar Scampini
+# Aplicação principal do sistema de análise de notas
 
 import streamlit as st
-import plotly.express as px
-import plotly.graph_objects as go
-from src.leitura_dados import obter_todas_turmas_processadas
-from src.analise_risco import analisar_turma_completa, obter_alunos_por_classificacao
-from src.upload_arquivo import criar_interface_upload, mostrar_validacao_arquivo, mostrar_historico_arquivos
+import os
+from datetime import datetime
+import traceback
+
+# Importar os módulos usando a estrutura src/ existente
+from src.leitura_dados import LeitorDadosExcel
+from src.upload_arquivo import GestorArquivos
+from src.analise_risco import AnalisadorDados
 
 # Configuração da página
 st.set_page_config(
-    page_title="EduRadar Scampini",
-    page_icon="🎯", 
+    page_title="Sistema IA - Análise de Notas",
+    page_icon="📚",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Título e descrição
-st.title("🎯 EduRadar Scampini")
-st.subheader("Sistema Inteligente de Monitoramento Pedagógico")
-st.markdown("**Identificação Precoce de Risco de Aprendizagem - Escola Estadual Padre José Scampini**")
+# CSS customizado para melhorar aparência
+st.markdown("""
+<style>
+    .main-header {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        color: white;
+        margin-bottom: 2rem;
+    }
+    .metric-card {
+        background: white;
+        padding: 1rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .alert-card {
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+        border-left: 5px solid;
+    }
+    .success-card {
+        background-color: #d4edda;
+        border-color: #28a745;
+        color: #155724;
+    }
+    .warning-card {
+        background-color: #fff3cd;
+        border-color: #ffc107;
+        color: #856404;
+    }
+    .error-card {
+        background-color: #f8d7da;
+        border-color: #dc3545;
+        color: #721c24;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# Interface de upload no menu lateral
-caminho_arquivo_usar = criar_interface_upload()
+class AplicacaoPrincipal:
+    def __init__(self):
+        self.leitor_dados = LeitorDadosExcel()
+        self.gestor_arquivos = GestorArquivos()
+        self.analisador_dados = AnalisadorDados()
+        
+        # Estado da sessão
+        if 'dados_carregados' not in st.session_state:
+            st.session_state.dados_carregados = None
+        if 'info_bimestre_atual' not in st.session_state:
+            st.session_state.info_bimestre_atual = None
+        if 'ultimo_arquivo_usado' not in st.session_state:
+            st.session_state.ultimo_arquivo_usado = None
 
-# Sidebar para navegação
-st.sidebar.title("📚 Navegação")
-opcao_menu = st.sidebar.selectbox(
-    "Escolha uma opção:",
-    ["🏠 Visão Geral", "📊 Análise por Turma", "👥 Alunos em Risco", "📈 Comparativo"]
-)
+    def executar(self):
+        """
+        Função principal que executa a aplicação
+        """
+        # Cabeçalho principal
+        self._criar_cabecalho()
+        
+        # Sidebar - Gestão de arquivos e navegação
+        caminho_arquivo, bimestre_selecionado = self._criar_sidebar()
+        
+        # Verificar se precisa recarregar dados
+        if self._precisa_recarregar_dados(caminho_arquivo):
+            self._carregar_dados(caminho_arquivo, bimestre_selecionado)
+        
+        # Área principal - Conteúdo baseado na navegação
+        self._criar_conteudo_principal()
 
-# Mostrar validação e histórico
-mostrar_validacao_arquivo(caminho_arquivo_usar)
-mostrar_historico_arquivos()
+    def _criar_cabecalho(self):
+        """
+        Cria cabeçalho principal da aplicação
+        """
+        st.markdown("""
+        <div class="main-header">
+            <h1>📚 Sistema de Análise - Turmas de Inteligência Artificial</h1>
+            <p>Acompanhamento pedagógico e identificação de alunos em risco</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-# Cache para carregar dados
-@st.cache_data
-def carregar_dados(caminho_arquivo):
-    """Carrega e processa todos os dados das turmas"""
-    return obter_todas_turmas_processadas(caminho_arquivo)
-
-# Carregar dados
-try:
-    with st.spinner("Carregando dados das turmas..."):
-        dados_todas_turmas = carregar_dados(caminho_arquivo_usar)
-    
-    # Verificar se conseguiu carregar dados
-    if not dados_todas_turmas or len(dados_todas_turmas) == 0:
-        st.error("❌ Nenhuma turma de IA foi encontrada no arquivo!")
-        st.info("Verifique se o arquivo contém as planilhas das turmas de IA")
-        st.stop()
-    
-    # Processar análises de todas as turmas
-    analises_completas = {}
-    for nome_turma, alunos_turma in dados_todas_turmas.items():
-        analises_completas[nome_turma] = analisar_turma_completa(alunos_turma)
-    
-    # PÁGINA: VISÃO GERAL
-    if opcao_menu == "🏠 Visão Geral":
-        st.markdown("---")
-        st.header("📊 Resumo Geral das Turmas de IA")
+    def _criar_sidebar(self):
+        """
+        Cria sidebar com navegação e gestão de arquivos
+        """
+        st.sidebar.title("🎯 Navegação")
         
-        # Calcular totais gerais
-        total_alunos_geral = 0
-        total_alto_risco = 0
-        total_risco_moderado = 0
-        total_atencao = 0
-        total_ok = 0
-        
-        for nome_turma, analise in analises_completas.items():
-            stats = analise['estatisticas']
-            total_alunos_geral += stats['total_alunos']
-            total_alto_risco += stats['alto_risco']
-            total_risco_moderado += stats['risco_moderado']
-            total_atencao += stats['atencao']
-            total_ok += stats['situacao_ok']
-        
-        # Verificar se há dados
-        if total_alunos_geral == 0:
-            st.warning("⚠️ Nenhum aluno encontrado nas turmas!")
-            st.info("Verifique se as planilhas contêm dados dos alunos")
-            st.stop()
-        
-        # Métricas principais
-        col1, col2, col3, col4, col5 = st.columns(5)
-        
-        with col1:
-            st.metric("👥 Total de Alunos", total_alunos_geral)
-        
-        with col2:
-            st.metric("🚨 Alto Risco", total_alto_risco, delta=f"-{round(total_alto_risco/total_alunos_geral*100, 1)}%")
-        
-        with col3:
-            st.metric("⚠️ Risco Moderado", total_risco_moderado)
-        
-        with col4:
-            st.metric("⚡ Atenção", total_atencao)
-        
-        with col5:
-            st.metric("✅ Situação OK", total_ok, delta=f"{round(total_ok/total_alunos_geral*100, 1)}%")
-        
-        # Gráfico de distribuição geral
-        st.subheader("🎯 Distribuição de Risco - Visão Geral")
-        
-        labels = ['Alto Risco', 'Risco Moderado', 'Atenção', 'Situação OK']
-        values = [total_alto_risco, total_risco_moderado, total_atencao, total_ok]
-        colors = ['#FF4B4B', '#FFA500', '#FFFF00', '#00FF00']
-        
-        fig_pizza = px.pie(
-            values=values,
-            names=labels,
-            title="Distribuição de Alunos por Classificação de Risco",
-            color_discrete_sequence=colors
+        # Menu principal
+        pagina = st.sidebar.selectbox(
+            "Escolha a análise:",
+            ["📊 Visão Geral", "🔍 Análise Detalhada", "⚠️ Alunos em Risco", "📋 Configurações"],
+            help="Selecione o tipo de análise que deseja visualizar"
         )
-        st.plotly_chart(fig_pizza, use_container_width=True)
         
-        # Resumo por turma
-        st.subheader("📚 Resumo por Turma")
+        st.session_state.pagina_atual = pagina
         
-        # Criar tabela resumo
-        dados_resumo = []
-        for nome_turma, analise in analises_completas.items():
-            stats = analise['estatisticas']
-            dados_resumo.append({
-                'Turma': nome_turma,
-                'Total Alunos': stats['total_alunos'],
-                'Alto Risco': stats['alto_risco'], 
-                'Risco Moderado': stats['risco_moderado'],
-                'Atenção': stats['atencao'],
-                'Situação OK': stats['situacao_ok'],
-                'Média da Turma': stats['media_turma'],
-                '% Risco': f"{stats['percentual_risco']}%"
-            })
+        # Gestão de arquivos
+        try:
+            caminho_arquivo, bimestre_selecionado = self.gestor_arquivos.criar_interface_completa()
+            return caminho_arquivo, bimestre_selecionado
+        except Exception as e:
+            st.sidebar.error(f"Erro na gestão de arquivos: {str(e)}")
+            return None, None
+
+    def _precisa_recarregar_dados(self, caminho_arquivo):
+        """
+        Verifica se precisa recarregar os dados
+        """
+        if not caminho_arquivo:
+            return False
+            
+        if st.session_state.dados_carregados is None:
+            return True
+            
+        if st.session_state.ultimo_arquivo_usado != caminho_arquivo:
+            return True
+            
+        return False
+
+    def _carregar_dados(self, caminho_arquivo, bimestre_selecionado):
+        """
+        Carrega dados do arquivo Excel
+        """
+        if not caminho_arquivo or not os.path.exists(caminho_arquivo):
+            st.error("❌ Arquivo não encontrado")
+            return
         
-        st.dataframe(dados_resumo, use_container_width=True)
-    
-    # PÁGINA: ANÁLISE POR TURMA  
-    elif opcao_menu == "📊 Análise por Turma":
-        st.markdown("---")
+        try:
+            # Mostrar progress bar
+            progress_bar = st.sidebar.progress(0)
+            status_text = st.sidebar.empty()
+            
+            status_text.text("🔍 Detectando formato do arquivo...")
+            progress_bar.progress(25)
+            
+            status_text.text("📊 Carregando dados das turmas...")
+            progress_bar.progress(50)
+            
+            # Carregar dados usando a classe melhorada
+            dados_processados, info_bimestre = self.leitor_dados.obter_dados_completos(
+                caminho_arquivo, bimestre_selecionado
+            )
+            
+            progress_bar.progress(75)
+            status_text.text("✅ Processando informações...")
+            
+            if dados_processados:
+                st.session_state.dados_carregados = dados_processados
+                st.session_state.info_bimestre_atual = info_bimestre
+                st.session_state.ultimo_arquivo_usado = caminho_arquivo
+                
+                progress_bar.progress(100)
+                status_text.text("🎉 Dados carregados com sucesso!")
+                
+                # Mostrar resumo do carregamento
+                st.sidebar.success(f"✅ {info_bimestre.get('turmas_carregadas', 0)} turmas carregadas")
+                
+                # Limpar progress após 2 segundos
+                import time
+                time.sleep(1)
+                progress_bar.empty()
+                status_text.empty()
+                
+            else:
+                st.sidebar.error("❌ Erro ao processar dados")
+                progress_bar.empty()
+                status_text.empty()
+                
+        except Exception as e:
+            st.sidebar.error(f"❌ Erro ao carregar dados: {str(e)}")
+            st.sidebar.error("🔧 Verifique se o arquivo Excel está no formato correto")
+            
+            # Mostrar detalhes do erro em debug mode
+            if st.sidebar.checkbox("🐛 Mostrar detalhes do erro"):
+                st.sidebar.code(traceback.format_exc())
+
+    def _criar_conteudo_principal(self):
+        """
+        Cria conteúdo principal baseado na página selecionada
+        """
+        pagina = st.session_state.get('pagina_atual', '📊 Visão Geral')
+        dados = st.session_state.dados_carregados
+        
+        if not dados:
+            self._mostrar_tela_inicial()
+            return
+        
+        # Roteamento de páginas
+        try:
+            if pagina == "📊 Visão Geral":
+                self._mostrar_visao_geral(dados)
+            elif pagina == "🔍 Análise Detalhada":
+                self._mostrar_analise_detalhada(dados)
+            elif pagina == "⚠️ Alunos em Risco":
+                self._mostrar_alunos_risco(dados)
+            elif pagina == "📋 Configurações":
+                self._mostrar_configuracoes()
+                
+        except Exception as e:
+            st.error(f"❌ Erro ao processar os dados: {str(e)}")
+            st.error("🔧 Verifique se o arquivo Excel está no formato correto")
+            st.error("📋 Tente fazer upload de um novo arquivo usando a sidebar")
+            
+            # Mostrar detalhes do erro para debug
+            if st.checkbox("🐛 Ver detalhes do erro"):
+                st.code(traceback.format_exc())
+            
+            # Botão para limpar cache
+            if st.button("🔄 Limpar dados e recarregar"):
+                st.session_state.dados_carregados = None
+                st.session_state.info_bimestre_atual = None
+                st.session_state.ultimo_arquivo_usado = None
+                st.rerun()
+
+    def _mostrar_tela_inicial(self):
+        """
+        Mostra tela inicial quando não há dados carregados
+        """
+        st.markdown("""
+        <div class="alert-card warning-card">
+            <h3>👋 Bem-vinda ao Sistema de Análise de Turmas de IA!</h3>
+            <p>Para começar, você precisa:</p>
+            <ol>
+                <li>📁 Selecionar um bimestre no menu lateral (se disponível)</li>
+                <li>📤 Ou fazer upload de uma nova planilha</li>
+                <li>⏳ Aguardar o processamento dos dados</li>
+            </ol>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Informações sobre formatos suportados
+        with st.expander("📋 Formatos de arquivo suportados"):
+            st.write("""
+            **Formatos aceitos:**
+            - 📊 **2º Bimestre:** Planilhas com sufixo " - IA" (ex: "1º ano G - IA")
+            - 📊 **3º Bimestre:** Planilhas sem sufixo (ex: "1º ano G")  
+            - 📊 **4º Bimestre:** Planilhas com sufixo " - 4º Bim" (ex: "1º ano G - 4º Bim")
+            
+            **Turmas esperadas:**
+            - 1º ano G, 1º ano E
+            - 2º ano G, 2º ano D, 2º ano E  
+            - 3º ano E
+            
+            **Estrutura esperada por planilha:**
+            - Coluna A: Nome do aluno
+            - Colunas B, D, F: Notas das UCPs 1, 2, 3
+            - Colunas C, E, G: Faltas das UCPs 1, 2, 3
+            - Coluna H: Nota do Projeto (opcional)
+            - Coluna I: Faltas do Projeto (opcional)
+            """)
+
+    def _mostrar_visao_geral(self, dados):
+        """
+        Mostra página de visão geral
+        """
+        self.analisador_dados.criar_resumo_geral(dados)
+
+    def _mostrar_analise_detalhada(self, dados):
+        """
+        Mostra página de análise detalhada
+        """
+        turmas_disponiveis = list(dados.get('turmas', {}).keys())
+        
+        if not turmas_disponiveis:
+            st.warning("⚠️ Nenhuma turma disponível para análise")
+            return
         
         # Seletor de turma
         turma_selecionada = st.selectbox(
-            "📚 Selecione uma turma para análise detalhada:",
-            list(analises_completas.keys())
+            "Selecione a turma para análise detalhada:",
+            turmas_disponiveis,
+            format_func=lambda x: x.replace(' - IA', ''),
+            help="Escolha uma turma para ver análise completa"
         )
         
         if turma_selecionada:
-            analise_turma = analises_completas[turma_selecionada]
-            stats = analise_turma['estatisticas']
-            
-            st.header(f"📊 Análise Detalhada: {turma_selecionada}")
-            
-            # Métricas da turma
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric("👥 Total de Alunos", stats['total_alunos'])
-            
-            with col2:
-                st.metric("📖 Média da Turma", f"{stats['media_turma']}")
-            
-            with col3:
-                st.metric("📅 Média de Faltas", f"{stats['media_faltas']}")
-            
-            with col4:
-                st.metric("⚠️ % em Risco", f"{stats['percentual_risco']}%")
-            
-            # Distribuição de risco da turma
-            col_grafico1, col_grafico2 = st.columns(2)
-            
-            with col_grafico1:
-                # Gráfico de barras por classificação
-                classificacoes = ['Alto Risco', 'Risco Moderado', 'Atenção', 'Situação OK']
-                quantidades = [stats['alto_risco'], stats['risco_moderado'], stats['atencao'], stats['situacao_ok']]
-                
-                fig_barras = px.bar(
-                    x=classificacoes,
-                    y=quantidades,
-                    title=f"Distribuição de Alunos - {turma_selecionada}",
-                    color=classificacoes,
-                    color_discrete_sequence=['#FF4B4B', '#FFA500', '#FFFF00', '#00FF00']
-                )
-                st.plotly_chart(fig_barras, use_container_width=True)
-            
-            with col_grafico2:
-                # Ranking dos 10 melhores alunos
-                alunos_ordenados = sorted(
-                    analise_turma['alunos'], 
-                    key=lambda x: x['media'], 
-                    reverse=True
-                )[:10]
-                
-                nomes = [aluno['nome'].split()[0] + " " + aluno['nome'].split()[-1] for aluno in alunos_ordenados]
-                medias = [aluno['media'] for aluno in alunos_ordenados]
-                
-                fig_ranking = px.bar(
-                    x=medias,
-                    y=nomes,
-                    orientation='h',
-                    title="Top 10 Maiores Médias",
-                    color=medias,
-                    color_continuous_scale='Viridis'
-                )
-                fig_ranking.update_layout(yaxis={'categoryorder':'total ascending'})
-                st.plotly_chart(fig_ranking, use_container_width=True)
-    
-    # PÁGINA: ALUNOS EM RISCO
-    elif opcao_menu == "👥 Alunos em Risco":
-        st.markdown("---")
-        st.header("🚨 Alunos que Necessitam Atenção Especial")
-        
-        # Filtros
-        col_filtro1, col_filtro2 = st.columns(2)
-        
-        with col_filtro1:
-            turmas_filtro = st.multiselect(
-                "📚 Filtrar por turmas:",
-                list(analises_completas.keys()),
-                default=list(analises_completas.keys())
-            )
-        
-        with col_filtro2:
-            classificacao_filtro = st.selectbox(
-                "⚠️ Filtrar por classificação:",
-                ["Todas", "ALTO RISCO", "RISCO MODERADO", "ATENÇÃO"]
-            )
-        
-        # Coletar alunos em risco
-        alunos_risco_geral = []
-        
-        for nome_turma in turmas_filtro:
-            if nome_turma in analises_completas:
-                analise = analises_completas[nome_turma]
-                
-                for aluno in analise['alunos']:
-                    if classificacao_filtro == "Todas" or aluno['classificacao'] == classificacao_filtro:
-                        if aluno['classificacao'] != "SITUAÇÃO OK":
-                            aluno['turma'] = nome_turma
-                            alunos_risco_geral.append(aluno)
-        
-        # Exibir alunos em risco
-        if len(alunos_risco_geral) > 0:
-            st.subheader(f"📋 {len(alunos_risco_geral)} aluno(s) necessitam atenção")
-            
-            # Ordenar por maior risco
-            ordem_risco = {"ALTO RISCO": 0, "RISCO MODERADO": 1, "ATENÇÃO": 2}
-            alunos_risco_geral.sort(key=lambda x: (ordem_risco[x['classificacao']], -x['media']))
-            
-            for aluno in alunos_risco_geral:
-                # Definir cor do card baseado no risco
-                if aluno['classificacao'] == "ALTO RISCO":
-                    st.error(f"""
-                    **{aluno['nome']}** - {aluno['turma']}
-                    - 📊 Média: {aluno['media']}
-                    - 📅 Total de Faltas: {aluno['total_faltas']}
-                    - 🚨 Classificação: {aluno['classificacao']}
-                    """)
-                elif aluno['classificacao'] == "RISCO MODERADO":
-                    st.warning(f"""
-                    **{aluno['nome']}** - {aluno['turma']}
-                    - 📊 Média: {aluno['media']}
-                    - 📅 Total de Faltas: {aluno['total_faltas']}
-                    - ⚠️ Classificação: {aluno['classificacao']}
-                    """)
-                else:
-                    st.info(f"""
-                    **{aluno['nome']}** - {aluno['turma']}
-                    - 📊 Média: {aluno['media']}
-                    - 📅 Total de Faltas: {aluno['total_faltas']}
-                    - ⚡ Classificação: {aluno['classificacao']}
-                    """)
-        else:
-            st.success("🎉 Nenhum aluno encontrado com os critérios selecionados!")
-    
-    # PÁGINA: COMPARATIVO
-    elif opcao_menu == "📈 Comparativo":
-        st.markdown("---")
-        st.header("📈 Análise Comparativa entre Turmas")
-        
-        # Gráfico comparativo de médias
-        nomes_turmas = []
-        medias_turmas = []
-        percentuais_risco = []
-        
-        for nome_turma, analise in analises_completas.items():
-            stats = analise['estatisticas']
-            nomes_turmas.append(nome_turma.replace(" - IA", ""))
-            medias_turmas.append(stats['media_turma'])
-            percentuais_risco.append(stats['percentual_risco'])
-        
-        col_comp1, col_comp2 = st.columns(2)
-        
-        with col_comp1:
-            fig_medias = px.bar(
-                x=nomes_turmas,
-                y=medias_turmas,
-                title="Média Geral por Turma",
-                color=medias_turmas,
-                color_continuous_scale='RdYlGn'
-            )
-            fig_medias.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig_medias, use_container_width=True)
-        
-        with col_comp2:
-            fig_risco = px.bar(
-                x=nomes_turmas,
-                y=percentuais_risco,
-                title="Percentual de Alunos em Risco por Turma",
-                color=percentuais_risco,
-                color_continuous_scale='RdYlBu_r'
-            )
-            fig_risco.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig_risco, use_container_width=True)
+            self.analisador_dados.criar_analise_detalhada(dados, turma_selecionada)
 
-except FileNotFoundError:
-    st.error("❌ Arquivo de dados não encontrado!")
-    st.info("📁 Certifique-se de que o arquivo está na pasta 'dados/' ou faça upload de uma nova planilha")
-    st.info("📋 Use a função de upload na sidebar para carregar um novo arquivo")
-except Exception as e:
-    st.error(f"❌ Erro ao processar os dados: {str(e)}")
-    st.info("🔧 Verifique se o arquivo Excel está no formato correto")
-    st.info("📋 Tente fazer upload de um novo arquivo usando a sidebar")
+    def _mostrar_alunos_risco(self, dados):
+        """
+        Mostra página de alunos em risco
+        """
+        self.analisador_dados.criar_lista_alunos_risco(dados)
 
-# Rodapé
-st.markdown("---")
-st.markdown("**🎯 EduRadar Scampini** - Sistema desenvolvido pela profa. Thaysa e alunos do 2º ano E - Turma de IA")
-st.markdown("*Escola Estadual Padre José Scampini - Campo Grande/MS - 2025*")
+    def _mostrar_configuracoes(self):
+        """
+        Mostra página de configurações
+        """
+        st.title("📋 Configurações do Sistema")
+        
+        # Informações do sistema
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("ℹ️ Informações do Sistema")
+            st.info(f"📅 Data atual: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+            
+            if st.session_state.info_bimestre_atual:
+                info = st.session_state.info_bimestre_atual
+                st.info(f"📊 Bimestre ativo: {info.get('descricao', 'N/A')}")
+                st.info(f"🎯 Turmas carregadas: {info.get('turmas_carregadas', 0)}")
+        
+        with col2:
+            st.subheader("🔧 Ações do Sistema")
+            
+            if st.button("🔄 Recarregar dados atuais"):
+                st.session_state.dados_carregados = None
+                st.success("✅ Dados serão recarregados na próxima navegação")
+            
+            if st.button("🗑️ Limpar cache completo"):
+                for key in ['dados_carregados', 'info_bimestre_atual', 'ultimo_arquivo_usado']:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.success("✅ Cache limpo com sucesso")
+        
+        # Configurações de visualização
+        st.markdown("---")
+        st.subheader("🎨 Configurações de Visualização")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            mostrar_detalhes_debug = st.checkbox("🐛 Mostrar informações de debug", value=False)
+            tema_escuro = st.checkbox("🌙 Tema escuro (experimental)", value=False)
+        
+        with col2:
+            auto_refresh = st.checkbox("🔄 Auto-refresh (5 min)", value=False)
+            notificacoes_sound = st.checkbox("🔔 Notificações sonoras", value=False)
+        
+        if mostrar_detalhes_debug and st.session_state.dados_carregados:
+            st.markdown("---")
+            st.subheader("🐛 Informações de Debug")
+            
+            with st.expander("Ver dados brutos"):
+                st.json(st.session_state.info_bimestre_atual)
+            
+            with st.expander("Ver estatísticas detalhadas"):
+                dados = st.session_state.dados_carregados
+                st.write("**Resumo geral:**", dados.get('resumo_geral', {}))
+                st.write("**Número de turmas:**", len(dados.get('turmas', {})))
+
+# Função principal
+def main():
+    """
+    Função principal da aplicação
+    """
+    app = AplicacaoPrincipal()
+    app.executar()
+
+# Executar aplicação
+if __name__ == "__main__":
+    main()
