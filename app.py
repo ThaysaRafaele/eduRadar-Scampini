@@ -239,7 +239,7 @@ class AplicacaoPrincipal:
         """
         st.markdown("""
         <div class="alert-card warning-card">
-            <h3>👋 Bem-vinda ao Sistema de Análise de Turmas de IA!</h3>
+            <h3>👋 Bem-vindo ao Sistema de Análise de Turmas de IA!</h3>
             <p>Para começar, você precisa:</p>
             <ol>
                 <li>📁 Selecionar um bimestre no menu lateral (se disponível)</li>
