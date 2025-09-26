@@ -1,4 +1,3 @@
-# app.py
 # Dashboard principal do EduRadar Scampini
 
 import streamlit as st
@@ -6,6 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from src.leitura_dados import obter_todas_turmas_processadas
 from src.analise_risco import analisar_turma_completa, obter_alunos_por_classificacao
+from src.upload_arquivo import criar_interface_upload, mostrar_validacao_arquivo, mostrar_historico_arquivos
 
 # Configuração da página
 st.set_page_config(
@@ -20,6 +20,9 @@ st.title("🎯 EduRadar Scampini")
 st.subheader("Sistema Inteligente de Monitoramento Pedagógico")
 st.markdown("**Identificação Precoce de Risco de Aprendizagem - Escola Estadual Padre José Scampini**")
 
+# Interface de upload no menu lateral
+caminho_arquivo_usar = criar_interface_upload()
+
 # Sidebar para navegação
 st.sidebar.title("📚 Navegação")
 opcao_menu = st.sidebar.selectbox(
@@ -27,17 +30,26 @@ opcao_menu = st.sidebar.selectbox(
     ["🏠 Visão Geral", "📊 Análise por Turma", "👥 Alunos em Risco", "📈 Comparativo"]
 )
 
-# Cache para carregar dados apenas uma vez
+# Mostrar validação e histórico
+mostrar_validacao_arquivo(caminho_arquivo_usar)
+mostrar_historico_arquivos()
+
+# Cache para carregar dados
 @st.cache_data
-def carregar_dados():
+def carregar_dados(caminho_arquivo):
     """Carrega e processa todos os dados das turmas"""
-    caminho_arquivo = "dados/NOTAS BIMESTRAIS EPT 2º bimestre.xlsx"
     return obter_todas_turmas_processadas(caminho_arquivo)
 
 # Carregar dados
 try:
     with st.spinner("Carregando dados das turmas..."):
-        dados_todas_turmas = carregar_dados()
+        dados_todas_turmas = carregar_dados(caminho_arquivo_usar)
+    
+    # Verificar se conseguiu carregar dados
+    if not dados_todas_turmas or len(dados_todas_turmas) == 0:
+        st.error("❌ Nenhuma turma de IA foi encontrada no arquivo!")
+        st.info("Verifique se o arquivo contém as planilhas das turmas de IA")
+        st.stop()
     
     # Processar análises de todas as turmas
     analises_completas = {}
@@ -63,6 +75,12 @@ try:
             total_risco_moderado += stats['risco_moderado']
             total_atencao += stats['atencao']
             total_ok += stats['situacao_ok']
+        
+        # Verificar se há dados
+        if total_alunos_geral == 0:
+            st.warning("⚠️ Nenhum aluno encontrado nas turmas!")
+            st.info("Verifique se as planilhas contêm dados dos alunos")
+            st.stop()
         
         # Métricas principais
         col1, col2, col3, col4, col5 = st.columns(5)
@@ -296,13 +314,15 @@ try:
             st.plotly_chart(fig_risco, use_container_width=True)
 
 except FileNotFoundError:
-    st.error("Arquivo de dados não encontrado!")
-    st.info("Certifique-se de que o arquivo 'NOTAS BIMESTRAIS EPT 2º bimestre.xlsx' está na pasta 'dados/'")
+    st.error("❌ Arquivo de dados não encontrado!")
+    st.info("📁 Certifique-se de que o arquivo está na pasta 'dados/' ou faça upload de uma nova planilha")
+    st.info("📋 Use a função de upload na sidebar para carregar um novo arquivo")
 except Exception as e:
-    st.error(f"Erro ao processar os dados: {str(e)}")
-    st.info("Verifique se todas as dependências estão instaladas e o arquivo Excel está no formato correto")
+    st.error(f"❌ Erro ao processar os dados: {str(e)}")
+    st.info("🔧 Verifique se o arquivo Excel está no formato correto")
+    st.info("📋 Tente fazer upload de um novo arquivo usando a sidebar")
 
 # Rodapé
 st.markdown("---")
-st.markdown("**EduRadar Scampini** - Sistema desenvolvido pelos alunos do 2º ano E - Turma de IA")
+st.markdown("**🎯 EduRadar Scampini** - Sistema desenvolvido pela profa. Thaysa e alunos do 2º ano E - Turma de IA")
 st.markdown("*Escola Estadual Padre José Scampini - Campo Grande/MS - 2025*")
